@@ -3,3 +3,5 @@ requests
 transliterate
 httpx[socks]
 pytzpytz 
+pytz
+flask

@@ -9,7 +9,22 @@ from transliterate import translit
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-TOKEN = "8981103282:AAEZ6rHwTlKXnW9SbofdBFZ5uxVmfPbpgY8"
+from flask import Flask
+import threading
+
+app_flask = Flask(__name__)
+
+@app_flask.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host='0.0.0.0', port=port)
+
+threading.Thread(target=run_flask, daemon=True).start()
+
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8981103282:AAEZ6rHwTlKXnW9SbofdBFZ5uxVmfPbpgY8")
 
 # --- БАЗА ДАННЫХ ---
 
