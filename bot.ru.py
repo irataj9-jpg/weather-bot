@@ -26,7 +26,7 @@ def run_flask():
 threading.Thread(target=run_flask, daemon=True).start()
 # ===== КОНЕЦ =====
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8981103282:AAEZ6rHwTlKXnW9SbofdBFZ5uxVmfPbpgY8")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8981103282:AAF-_yHvIQN6fqTO58-6e2B_hXz0Ocy7zN4")
 
 # --- БАЗА ДАННЫХ ---
 
