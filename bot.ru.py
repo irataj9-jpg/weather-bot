@@ -4,6 +4,7 @@ os.environ["HTTPS_PROXY"] = ""
 import datetime
 import sqlite3
 import requests
+import pytz
 from transliterate import translit
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -15,6 +16,7 @@ TOKEN = "8981103282:AAEZ6rHwTlKXnW9SbofdBFZ5uxVmfPbpgY8"
 def init_db():
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -25,6 +27,12 @@ def init_db():
             first_seen TEXT
         )
     """)
+    
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN timezone TEXT")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
 
@@ -47,6 +55,22 @@ def save_user(update: Update):
     conn.commit()
     conn.close()
 
+def set_user_city(user_id: int, city: str, timezone: str):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET default_city = ?, timezone = ? WHERE user_id = ?", 
+                   (city, timezone, user_id))
+    conn.commit()
+    conn.close()
+
+def get_user_data(user_id: int):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT default_city, timezone FROM users WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result if result else (None, None)
+
 def get_user_city(user_id: int):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
@@ -54,13 +78,6 @@ def get_user_city(user_id: int):
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else None
-
-def set_user_city(user_id: int, city: str):
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET default_city = ? WHERE user_id = ?", (city, user_id))
-    conn.commit()
-    conn.close()
 
 def get_all_users():
     conn = sqlite3.connect("users.db")
@@ -104,21 +121,9 @@ def get_weather_for_city(city_ru: str):
     day_code = hourly["weathercode"][12]
     evening_code = hourly["weathercode"][18]
     
-    # Определяем дождь
     def is_rain(code):
         return code in [51, 53, 55, 61, 63, 65, 80, 81, 82]
     
-    def weather_icon(code):
-        if is_rain(code):
-            return "☔️ дождь"
-        else:
-            return "☀️ без осадков"
-    
-    morning_rain = weather_icon(morning_code)
-    day_rain = weather_icon(day_code)
-    evening_rain = weather_icon(evening_code)
-    
-    # Краткий итог
     rain_morning = "☔️" if is_rain(morning_code) else "☀️"
     rain_day = "☔️" if is_rain(day_code) else "☀️"
     rain_evening = "☔️" if is_rain(evening_code) else "☀️"
@@ -132,6 +137,28 @@ def get_weather_for_city(city_ru: str):
     )
     
     return text
+
+def get_timezone_for_city(city_ru: str):
+    try:
+        city_lat = translit(city_ru, 'ru', reversed=True)
+    except:
+        city_lat = city_ru
+    
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city_lat}&count=1"
+    geo_response = requests.get(geo_url)
+    geo_data = geo_response.json()
+    
+    if not geo_data.get("results"):
+        return None
+    
+    lat = geo_data["results"][0]["latitude"]
+    lon = geo_data["results"][0]["longitude"]
+    
+    tz_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&timezone=auto&forecast_days=1"
+    tz_response = requests.get(tz_url)
+    tz_data = tz_response.json()
+    
+    return tz_data.get("timezone", "Europe/Moscow")
 
 # --- ЕЖЕДНЕВНАЯ РАССЫЛКА ---
 
@@ -195,9 +222,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now()
+    user_id = update.effective_user.id
+    city, timezone_str = get_user_data(user_id)
+    
+    if not timezone_str:
+        await update.message.reply_text(
+            "⚠️ Сначала установите город с помощью команды:\n/setcity Москва"
+        )
+        return
+    
+    tz = pytz.timezone(timezone_str)
+    now = datetime.datetime.now(tz)
     time_str = now.strftime("%H:%M:%S")
-    await update.message.reply_text(f"🕐 Текущее время: {time_str}")
+    
+    await update.message.reply_text(f"🕐 Текущее время в {city}: {time_str}")
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -206,7 +244,9 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last_name = user.last_name or "Не указано"
     username = user.username or "Не указан"
     
-    default_city = get_user_city(user_id) or "Не указан"
+    city, timezone = get_user_data(user_id)
+    city = city or "Не указан"
+    timezone = timezone or "Не указан"
     
     text = (
         f"👤 Информация о пользователе:\n\n"
@@ -214,7 +254,8 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📛 Имя: {first_name}\n"
         f"📛 Фамилия: {last_name}\n"
         f"🔹 Username: @{username}\n"
-        f"🏙 Город по умолчанию: {default_city}"
+        f"🏙 Город: {city}\n"
+        f"🕐 Часовой пояс: {timezone}"
     )
     
     await update.message.reply_text(text)
@@ -230,11 +271,18 @@ async def setcity_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = " ".join(context.args)
     user_id = update.effective_user.id
     
-    set_user_city(user_id, city)
+    timezone = get_timezone_for_city(city)
+    
+    if not timezone:
+        await update.message.reply_text(f"❌ Город '{city}' не найден. Попробуйте другой.")
+        return
+    
+    set_user_city(user_id, city, timezone)
     
     await update.message.reply_text(
         f"✅ Город '{city}' сохранён как город по умолчанию.\n"
-        "Теперь я буду присылать прогноз погоды каждое утро!"
+        f"🕐 Часовой пояс: {timezone}\n"
+        "Теперь я буду показывать время и погоду для этого города!"
     )
 
 async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,9 +315,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
     if text == "🕐 Время":
-        now = datetime.datetime.now()
-        time_str = now.strftime("%H:%M:%S")
-        await update.message.reply_text(f"🕐 Текущее время: {time_str}")
+        await time_command(update, context)
     elif text == "ℹ️ Помощь":
         await help_command(update, context)
     elif text == "👤 Инфо":
@@ -298,7 +344,6 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # --- НАСТРОЙКА ЕЖЕДНЕВНОЙ РАССЫЛКИ ---
     job_queue = app.job_queue
     
     if job_queue:
