@@ -2,6 +2,5 @@ python-telegram-bot[job-queue]
 requests
 transliterate
 httpx[socks]
-pytzpytz 
 pytz
 flask
