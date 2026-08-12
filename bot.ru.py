@@ -5,12 +5,13 @@ import datetime
 import sqlite3
 import requests
 import pytz
+import threading
 from transliterate import translit
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+# ===== ВЕБ-СЕРВЕР ДЛЯ RENDER =====
 from flask import Flask
-import threading
 
 app_flask = Flask(__name__)
 
@@ -23,6 +24,7 @@ def run_flask():
     app_flask.run(host='0.0.0.0', port=port)
 
 threading.Thread(target=run_flask, daemon=True).start()
+# ===== КОНЕЦ =====
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8981103282:AAEZ6rHwTlKXnW9SbofdBFZ5uxVmfPbpgY8")
 
